@@ -2,10 +2,10 @@
 
 面向公司内部多业务的人脸核验能力服务，提供无状态人脸 1:1、静默活体、人脸档案 1:1、1:N 检索和证件 OCR，供 KYC 与敏感操作二次验证复用。
 
-> 状态：最小全链路已实现并冒烟通过（2026-11-14）：Kotlin Toolchain 五模块 + Spring Boot API（dev token / challenges /
-> enrollments / verifications，真实 mica-ai-face 引擎）+ H5 联调页。1:1 检索（identify）、证件 OCR、Worker
-> 异步任务、对象存储留档为后续批次。2026-11-14 技术栈由 .NET（ViewFaceCore）切换为 Spring Boot + mica-ai-face（项目管理与构建用
-> JetBrains Kotlin Toolchain），全部文档与 SQL 已按新栈对齐；此前的 .NET 实现与验证记录已作废，过程留存见
+> 状态：最小全链路已实现并冒烟通过（2026-11-14）：Maven 多模块 + Spring Boot API（dev token / challenges /
+> action-check / enrollments / verifications，真实 mica-ai-face 引擎）+ H5 联调页。1:1 检索（identify）、证件 OCR、Worker
+> 异步任务、对象存储留档为后续批次。2026-11-14 技术栈由 .NET（ViewFaceCore）切换为 Spring Boot + mica-ai-face，构建经
+> Kotlin Toolchain 过渡后统一为标准 Maven（详见需求 0001 方案评估修订记录）；此前的 .NET 实现与验证记录已作废，过程留存见
 > `docs/功能/04-验证与已知限制.md` 与需求 0001 方案评估。
 
 ## 功能概览
@@ -40,7 +40,7 @@ flowchart LR
 
 | 服务                | 入口（规划）                                                                         | 默认端口 | 职责                                                         |
 |---------------------|--------------------------------------------------------------------------------------|----------|--------------------------------------------------------------|
-| face-service-api    | `face-service-api/module.yaml`（mainClass `faceservice.api.FaceServiceApplication`） | 8080     | HTTP API、JWT 鉴权、Actuator 健康探针（限流/OpenAPI 未启用） |
+| face-service-api    | `face-service-api/pom.xml`（spring-boot-maven-plugin）                                | 8080     | HTTP API、JWT 鉴权、Actuator 健康探针（限流/OpenAPI 未启用） |
 | face-service-worker | 未创建                                                                               | 无       | 异步任务、过期清理、索引重建（下一批次）                     |
 | 本地采集页          | `face-service-api/resources/static/dev/face-test.html`                               | 8080     | 仅 dev profile 的 H5 验证页                                  |
 
@@ -50,7 +50,8 @@ flowchart LR
 .
 ├── README.md
 ├── AGENTS.md
-├── project.yaml                 # Kotlin Toolchain 项目配置
+├── pom.xml                      # Maven 多模块（依赖版本集中仲裁）
+├── mvnw                         # Maven Wrapper
 ├── face-service-api/            # HTTP 入口（5 条路由 + dev H5）
 ├── face-service-application/    # 用例编排（token/challenge/action/enroll/verify）
 ├── face-service-domain/         # 领域接口与值对象
@@ -58,7 +59,7 @@ flowchart LR
 ├── face-service-contracts/      # 错误码与 DTO
 ├── face-service-worker/         # 未创建（异步任务批次）
 ├── deploy/                      # docker-compose.dev.yml + initdb（DDL 按序 + dev 种子）
-├── models/                      # mica-ai-face 模型（.gitignore，不入库）
+│   （模型内嵌于 face-service-api/src/main/resources/models/，.gitignore 不入库）
 └── docs/
 ```
 
@@ -67,7 +68,7 @@ flowchart LR
 | 类别          | 选型                                                 | 说明                                                                                              |
 |---------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------|
 | 运行时        | Java 25（最低标准，Temurin）                         | Spring Boot 3.5.x 官方支持 JDK 25 LTS                                                             |
-| 项目管理/构建 | JetBrains Kotlin Toolchain（Alpha，ex-Amper）        | 声明式 `project.yaml` + `module.yaml`，统一 `kotlin` CLI；依赖走 Maven Central                    |
+| 构建         | 标准 Maven 多模块（`pom.xml` + `mvnw`）              | SB BOM 3.5.7 集中仲裁依赖版本；`spring-boot-maven-plugin` 产出可执行 jar                          |
 | Web           | Spring Boot 3.5.x（Web MVC + Validation + Actuator） | 统一 `/v1` 前缀                                                                                   |
 | 人脸引擎      | `net.dreamlu:mica-ai-face-spring-boot-starter`       | YuNet 检测 + SFace 128d 特征 + MiniFASNetV2 活体 + 头像/证件卡片提取；Apache-2.0，纯 ONNX Runtime |
 | OCR           | `net.dreamlu:mica-ppocr`                             | PP-OCR ONNX 推理，Apache-2.0（以仓库 LICENSE 为准）                                               |
@@ -80,11 +81,11 @@ flowchart LR
 
 ## 环境要求
 
-- JDK 25（Temurin，最低标准）、Kotlin Toolchain CLI（`kotlin`，Alpha）
+- JDK 25（Temurin，最低标准）、Maven 3.9+（仓库自带 `mvnw`）
 - PostgreSQL 16 及以上，安装 pgvector 扩展
 - Redis 7 及以上
 - 本地开发依赖一键创建：`deploy/docker-compose.dev.yml`（PostgreSQL+pgvector、Redis、RustFS）；线上对象存储为 Cloudflare R2
-- mica-ai-face 模型文件（YuNet / SFace / MiniFASNetV2 等，不入 jar，路径显式配置）、mica-ppocr 模型与第三方许可证文件
+- 模型文件已内嵌：`face-service-api/src/main/resources/models/`（classpath 加载，`.gitignore` 不入库；从 mica-ai 上游仓库获取）
 
 ## 快速开始
 
@@ -114,9 +115,10 @@ docker exec faceservice-postgres psql -U faceservice -d faceservice -c '\dt'   #
 # Redis 宿主端口冲突时在 deploy/.env 设 REDIS_PORT=16379（本机现状）
 docker compose -f deploy/docker-compose.dev.yml up -d   # PG+pgvector / Redis / RustFS
 
-SPRING_PROFILES_ACTIVE=dev REDIS_PORT=16379 FACE_MODEL_DIR="$PWD/models" \
-kotlin run -m face-service-api
-# 启动即加载三个 ONNX 模型（YuNet / SFace / MiniFASNetV2），约 2.5s
+./mvnw -DskipTests package
+SPRING_PROFILES_ACTIVE=dev REDIS_PORT=16379 \
+java -jar face-service-api/target/face-service-api.jar
+# 启动即从 classpath 加载三个 ONNX 模型（YuNet / SFace / MiniFASNetV2），约 2.5s
 
 # 浏览器打开全链路联调页（录入→认证，同源无 CORS）：
 #   http://localhost:8080/dev/face-test.html
@@ -164,9 +166,9 @@ docker run --rm -p 8080:8080 \
 
 ## 测试
 
-- **测试尚未编写（当前最大缺口）**：规划为 `kotlin test`，单元（JUnit 5 + Mockito stub
+- **测试尚未编写（当前最大缺口）**：规划为 `./mvnw test`，单元（JUnit 5 + Mockito stub
   接口）覆盖策略、阈值、错误码、JWT、租户隔离；集成（Testcontainers）依赖 PostgreSQL 与 Redis，并直接加载真实 mica-ai-face
-  模型。当前质量依据：`kotlin build` + 运行时冒烟（见 docs/功能/04）。
+  模型。当前质量依据：`./mvnw -DskipTests package` + 运行时冒烟（见 docs/功能/04）。
 - 本地 H5 验证依赖摄像头；当前未执行。
 - 未运行的验证项必须写明原因，不得写成已通过。
 
@@ -186,8 +188,7 @@ docker run --rm -p 8080:8080 \
   上下文强制注入。
 - 阈值、帧数、留存周期全部配置化（`@ConfigurationProperties` record 绑定），按租户覆盖。
 - DTO 用 `record`、构造器注入、SLF4J 占位符日志；日志不输出人脸图片、特征、证件号、完整姓名等敏感信息。
-- 代码风格 4 空格 / 120 列，以《阿里巴巴 Java 开发手册》为底线；静态检查门禁待 Kotlin Toolchain 生态接入，当前以 IDE 与 CI
-  约定执行。
+- 代码风格 4 空格 / 120 列，以《阿里巴巴 Java 开发手册》为底线；静态检查门禁（Spotless/P3C）待接入，当前以 IDE 与 CI 约定执行。
 
 ## 安全须知
 

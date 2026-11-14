@@ -19,7 +19,7 @@ OCR。
 6. `docs/需求/0001/0001-人脸核验平台-实施方案.md`：本期契约与改动清单
 7. 目标改动附近的代码与测试
 
-当前仓库已落地最小链路：Kotlin Toolchain 五模块（contracts/domain/application/infrastructure/api）+ 5
+当前仓库已落地最小链路：Maven 多模块（contracts/domain/application/infrastructure/api）+ 5
 条路由（/dev/token、/v1/challenges、/v1/action-check、/v1/enrollments、/v1/verifications）+ dev
 H5；identify/OCR/sessions/results/subjects 路由与 Worker 尚未实现，测试未编写。文档以代码和实测为准持续更新。
 
@@ -38,8 +38,7 @@ H5；identify/OCR/sessions/results/subjects 路由与 Worker 尚未实现，测�
 
 ## 技术栈基线
 
-- JDK 25（最低标准，Temurin），源码 Java；项目管理与构建用 JetBrains Kotlin Toolchain（Alpha，ex-Amper）：声明式 `project.yaml` +
-  各模块 `module.yaml`，统一 `kotlin` CLI
+- JDK 25（最低标准，Temurin），源码 Java；标准 Maven 多模块构建（parent `pom.xml` 集中仲裁版本 + `mvnw`）
 - Spring Boot 3.5.x（Web MVC、Validation、Actuator）
 - 人脸引擎：`net.dreamlu:mica-ai-face-spring-boot-starter`（YuNet 检测 + SFace 128d 特征 + MiniFASNetV2 活体 + 头像/证件卡片提取）
 - OCR：`net.dreamlu:mica-ppocr`（PP-OCR ONNX 推理）
@@ -49,19 +48,19 @@ H5；identify/OCR/sessions/results/subjects 路由与 Worker 尚未实现，测�
 ## 常用命令
 
 ```bash
-# 构建
-kotlin build
+# 构建（jar 输出 face-service-api/target/）
+./mvnw -DskipTests package
 
-# 测试
-kotlin test
+# 测试（尚未编写，规划口径）
+./mvnw test
 
 # 本地开发依赖（PostgreSQL+pgvector、Redis、RustFS）
 docker compose -f deploy/docker-compose.dev.yml up -d
 
 # 本地开发（真实引擎 + DevToken，仅 dev profile；模型路径在 application-dev.yml 的 mica.ai.face.model.* 配置）
-SPRING_PROFILES_ACTIVE=dev \
+SPRING_PROFILES_ACTIVE=dev REDIS_PORT=16379 \
 AUTH_MODE=dev-token AUTH_ENABLE_DEV_TOKEN=true \
-kotlin run -m face-service-api
+java -jar face-service-api/target/face-service-api.jar
 
 # 文档校验
 node ~/.agents/skills/project-docs-bootstrap/scripts/check-docs.mjs \
@@ -71,8 +70,7 @@ node ~/.agents/skills/requirement-docs/scripts/check-docs.mjs \
 ```
 
 - 全量集成测试依赖 PostgreSQL 与 Redis（Testcontainers 或本地 compose）；未运行项必须在交付说明中列出。
-- ONNX 推理（mica-ai-face / mica-ppocr）需要模型文件；模型不入 jar，路径必须显式配置后才能启动真实引擎。
-- Kotlin Toolchain 处于 Alpha：`kotlin` 子命令以官方 CLI 文档（kotlin-toolchain.org/dev/cli）为准；骨架阶段先做 Kotlin
+- 模型文件内嵌于 `face-service-api/src/main/resources/models/`（classpath 加载，`.gitignore` 不入库，来源为 mica-ai 上游仓库）；缺失时启动即失败。
   Toolchain × JDK 25 × Spring Boot 3.5 组合冒烟。
 
 ## 架构与编码规则
@@ -148,7 +146,7 @@ node ~/.agents/skills/requirement-docs/scripts/check-docs.mjs \
 
 ## 完成标准
 
-- `kotlin build` 通过；与改动相关的测试实际运行并记录结果。
+- `./mvnw -DskipTests package` 通过；与改动相关的测试实际运行并记录结果。
 - 接口、配置、错误码、文档与功能清单同步。
 - 租户隔离、JWT、jti、challenge 绑定未被削弱。
 - 没有人脸/证件敏感信息进入日志、文档或提交。
