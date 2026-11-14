@@ -59,7 +59,7 @@ flowchart LR
 ├── face-service-contracts/      # 错误码与 DTO
 ├── face-service-worker/         # 未创建（异步任务批次）
 ├── deploy/                      # docker-compose.dev.yml + initdb（DDL 按序 + dev 种子）
-│   （模型内嵌于 face-service-api/src/main/resources/models/，.gitignore 不入库）
+│   （模型内嵌于 face-service-api/src/main/resources/models/，已随仓库入库）
 └── docs/
 ```
 
@@ -85,7 +85,7 @@ flowchart LR
 - PostgreSQL 16 及以上，安装 pgvector 扩展
 - Redis 7 及以上
 - 本地开发依赖一键创建：`deploy/docker-compose.dev.yml`（PostgreSQL+pgvector、Redis、RustFS）；线上对象存储为 Cloudflare R2
-- 模型文件已内嵌：`face-service-api/src/main/resources/models/`（classpath 加载，`.gitignore` 不入库；从 mica-ai 上游仓库获取）
+- 模型文件已内嵌并入库：`face-service-api/src/main/resources/models/`（classpath 加载，共约 39MB）
 
 ## 快速开始
 
@@ -111,7 +111,7 @@ docker exec faceservice-postgres psql -U faceservice -d faceservice -c '\dt'   #
 ### 服务运行（已验证，2026-11-14）
 
 ```bash
-# 前置：模型文件在 models/（见 models/README，缺失启动即失败）；
+# 前置：模型已在 face-service-api/src/main/resources/models/（随仓库入库，缺失则 jar 内无模型，启动即失败）；
 # Redis 宿主端口冲突时在 deploy/.env 设 REDIS_PORT=16379（本机现状）
 docker compose -f deploy/docker-compose.dev.yml up -d   # PG+pgvector / Redis / RustFS
 
