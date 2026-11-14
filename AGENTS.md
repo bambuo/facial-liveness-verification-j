@@ -70,7 +70,7 @@ node ~/.agents/skills/requirement-docs/scripts/check-docs.mjs \
 ```
 
 - 全量集成测试依赖 PostgreSQL 与 Redis（Testcontainers 或本地 compose）；未运行项必须在交付说明中列出。
-- 模型文件内嵌于 `face-service-api/src/main/resources/models/`（classpath 加载，`.gitignore` 不入库，来源为 mica-ai 上游仓库）；缺失时启动即失败。
+- 模型文件内嵌于 `face-service-api/src/main/resources/models/`（classpath 加载，已随仓库入库，来源为 mica-ai 上游仓库 Apache-2.0）；缺失时启动即失败。换模型需评估仓库体积与历史不可变。
   Toolchain × JDK 25 × Spring Boot 3.5 组合冒烟。
 
 ## 架构与编码规则
