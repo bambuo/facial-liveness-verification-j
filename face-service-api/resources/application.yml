@@ -1,0 +1,86 @@
+spring:
+  application:
+    name: face-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/faceservice?stringtype=unspecified}
+    username: ${DB_USER:faceservice}
+    password: ${DB_PASSWORD:faceservice_dev}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:faceservice_dev}
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 20MB
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+
+springdoc:
+  enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    redis:
+      enabled: true
+    db:
+      enabled: true
+
+faceservice:
+  auth:
+    enable-dev-token: false
+    dev-signing-key: ${AUTH_DEV_SIGNING_KEY:}
+    result-token-signing-key: ${AUTH_RESULT_TOKEN_KEY:}
+  face:
+    match-threshold: 0.35
+    liveness-threshold: 0.85
+    live-ratio-threshold: 0.5
+    yaw-threshold: 0.20        # 转头判定幅度（|yaw|≥此值计为已转头）
+    straight-yaw: 0.15         # 正视判定（|yaw|≤此值）
+    mouth-open-ratio: 1.08     # 张嘴判定（相对 straight 段基线）
+    action-pass-ratio: 0.5     # 每段满足动作的帧占比下限
+  challenge:
+    ttl-seconds: 300
+    frame-count: 8
+  security:
+    master-key: ${SECURITY_MASTER_KEY:}
+
+security:
+  master-key: ${SECURITY_MASTER_KEY:}
+
+mica:
+  ai:
+    face:
+      model:
+        detection:
+          path: ${FACE_MODEL_DIR:models}/face_detection_yunet_2023mar.onnx
+        recognition:
+          path: ${FACE_MODEL_DIR:models}/face_recognition_sface_2021dec.onnx
+        liveness:
+          path: ${FACE_MODEL_DIR:models}/2.7_80x80_MiniFASNetV2.onnx
+      detection:
+        threshold: 0.9
+        nms-threshold: 0.3
+      liveness:
+        enabled: true
+        threshold: 0.85
+        crop-scale: 2.7
+      verify:
+        threshold: 0.35
+        strategy: LARGEST_AREA
+      onnx:
+        device: CPU

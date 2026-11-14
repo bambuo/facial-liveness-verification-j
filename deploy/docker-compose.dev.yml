@@ -1,0 +1,53 @@
+# 本地开发依赖：PostgreSQL(+pgvector)、Redis、RustFS（S3 兼容对象存储）
+# 首次使用：cp deploy/.env.example deploy/.env 并替换默认口令
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: faceservice-postgres
+    environment:
+      POSTGRES_USER: faceservice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-faceservice_dev}
+      POSTGRES_DB: faceservice
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - faceservice_pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ../docs/需求/0001/sql:/sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U faceservice -d faceservice" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: faceservice-redis
+    command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD:-faceservice_dev}" ]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-faceservice_dev}", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: faceservice-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-faceservice}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-faceservice_dev_secret}
+    ports:
+      - "9000:9000"
+    volumes:
+      - faceservice_rustfs:/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:9000/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  faceservice_pgdata:
+  faceservice_rustfs:

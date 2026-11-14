@@ -1,0 +1,9 @@
+product: jvm/lib
+
+settings:
+  springBoot:
+    enabled: true
+    version: 3.5.7
+    applyBom: true
+  jvm:
+    release: 25

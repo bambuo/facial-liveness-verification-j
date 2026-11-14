@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport">
+    <title>人脸核验 · 开发联调页</title>
+    <!--
+      人脸核验平台 dev H5（仅本地联调，对应文档 02-功能清单 客户端组件）
+      按实施方案 §4 契约调用真实接口：/dev/token → /v1/challenges → /v1/enrollments → /v1/verifications
+      - 由 face-service-api 同源服务时访问 /dev/face-test.html（无 CORS）
+      - 后端未落地时也可用静态服务器打开（需 HTTPS 或 localhost 才能使用摄像头），
+        跨源访问需后端放开 CORS
+      - 不缓存帧，上传后立即释放；不打印任何帧/特征到日志
+    -->
+    <style>
+        :root {
+            --face: 232px; /* 取景框直径：手机默认，桌面端按视口放大 */
+            --blue: #1677ff;
+            --blue-deep: #0e42d2;
+            --green: #07c160;
+            --red: #fa5151;
+            --ink: #1a1a1a;
+            --ink-2: #595959;
+            --ink-3: #8c8c8c;
+            --line: #ececec;
+            --bg: #f5f6f8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            background: #17181c;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC",
+            "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+            color: var(--ink);
+            display: flex;
+            justify-content: center;
+        }
+
+        .phone {
+            position: relative;
+            width: 100%;
+            max-width: 430px;
+            min-height: 100dvh;
+            background: var(--bg);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 桌面端：取景框按视口高度放大，摄像头前无需坐得很远 */
+        @media (min-width: 700px) and (min-height: 620px) {
+            :root {
+                --face: min(56vh, 520px);
+            }
+
+            .phone {
+                max-width: 680px;
+            }
+
+            .camera-stage .hint {
+                font-size: 20px;
+            }
+
+            .camera-stage .subhint {
+                font-size: 14px;
+            }
+        }
+
+        /* ---------- 顶部导航 ---------- */
+        .navbar {
+            flex: none;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 16px;
+            background: var(--bg);
+            position: relative;
+            z-index: 30;
+        }
+
+        .navbar .back {
+            font-size: 22px;
+            line-height: 1;
+            color: var(--ink);
+            padding: 4px 8px 4px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .navbar .title {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .navbar .spacer {
+            flex: 1;
+        }
+
+        .navbar .gear {
+            font-size: 20px;
+            color: var(--ink-2);
+            cursor: pointer;
+            padding: 4px 0 4px 8px;
+            user-select: none;
+        }
+
+        /* ---------- 步骤条 ---------- */
+        .steps {
+            flex: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 6px 16px 14px;
+        }
+
+        .steps .step {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--ink-3);
+        }
+
+        .steps .dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e2e4e9;
+            color: var(--ink-3);
+            font-weight: 600;
+        }
+
+        .steps .step.active {
+            color: var(--blue);
+            font-weight: 600;
+        }
+
+        .steps .step.active .dot {
+            background: var(--blue);
+            color: #fff;
+        }
+
+        .steps .step.done {
+            color: var(--green);
+        }
+
+        .steps .step.done .dot {
+            background: var(--green);
+            color: #fff;
+        }
+
+        .steps .bar {
+            width: 36px;
+            height: 2px;
+            background: #e2e4e9;
+            border-radius: 2px;
+        }
+
+        .steps .bar.done {
+            background: var(--green);
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .view {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .view.show {
+            display: flex;
+        }
+
+        /* ---------- 普通内容页（intro / result / done） ---------- */
+        .page {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 8px 20px calc(24px + env(safe-area-inset-bottom));
+            overflow-y: auto;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 18px 16px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .04);
+        }
+
+        .card + .card {
+            margin-top: 12px;
+        }
+
+        .card h3 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card p, .card li {
+            font-size: 13px;
+            color: var(--ink-2);
+            line-height: 1.8;
+        }
+
+        .card ul {
+            padding-left: 18px;
+        }
+
+        .kv {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 13px;
+            padding: 7px 0;
+            border-bottom: 1px dashed var(--line);
+        }
+
+        .kv:last-child {
+            border-bottom: none;
+        }
+
+        .kv .k {
+            color: var(--ink-3);
+            flex: none;
+        }
+
+        .kv .v {
+            color: var(--ink);
+            text-align: right;
+            word-break: break-all;
+        }
+
+        .kv .v.mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+        }
+
+        .agree {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            margin-top: 14px;
+        }
+
+        .agree input {
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+            accent-color: var(--blue);
+            flex: none;
+        }
+
+        .agree label {
+            font-size: 13px;
+            color: var(--ink-2);
+            line-height: 1.7;
+            cursor: pointer;
+        }
+
+        .agree a {
+            color: var(--blue);
+            text-decoration: none;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 48px;
+            border-radius: 24px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            background: var(--blue);
+            color: #fff;
+            cursor: pointer;
+            transition: opacity .15s;
+        }
+
+        .btn:disabled {
+            background: #b8cbf5;
+            cursor: not-allowed;
+        }
+
+        .btn.ghost {
+            background: #fff;
+            color: var(--blue);
+            border: 1px solid #b8cbf5;
+        }
+
+        .btn.green {
+            background: var(--green);
+        }
+
+        .btn.red-ghost {
+            background: #fff;
+            color: var(--red);
+            border: 1px solid #ffd1d1;
+        }
+
+        .btn + .btn {
+            margin-top: 10px;
+        }
+
+        .btn-area {
+            margin-top: 18px;
+        }
+
+        /* ---------- 相机取景页 ---------- */
+        .camera-stage {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            background: radial-gradient(120% 90% at 50% 0%, #12294e 0%, #05070d 70%);
+            overflow: hidden;
+        }
+
+        .camera-stage video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 前置镜像，符合大厂刷脸页习惯 */
+        }
+
+        /* 中央圆框 + 四周压暗（大盒阴影遮罩法） */
+        .mask-ring {
+            position: absolute;
+            left: 50%;
+            top: 42%;
+            width: var(--face);
+            height: var(--face);
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            box-shadow: 0 0 0 9999px rgba(3, 6, 12, .78);
+            border: 2px solid rgba(255, 255, 255, .85);
+        }
+
+        .mask-ring::before {
+            content: "";
+            position: absolute;
+            inset: -14px;
+            border-radius: 50%;
+            border: 2px solid rgba(22, 119, 255, .55);
+            animation: breathe 2.2s ease-in-out infinite;
+        }
+
+        @keyframes breathe {
+            0%, 100% {
+                transform: scale(1);
+                opacity: .9;
+            }
+            50% {
+                transform: scale(1.045);
+                opacity: .35;
+            }
+        }
+
+        .scanline {
+            position: absolute;
+            left: 50%;
+            top: 42%;
+            width: var(--face);
+            height: var(--face);
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .scanline::after {
+            content: "";
+            position: absolute;
+            left: 10%;
+            width: 80%;
+            height: 46px;
+            border-radius: 50%;
+            background: linear-gradient(to bottom, rgba(22, 119, 255, 0), rgba(22, 119, 255, .55));
+            animation: scan 2.4s ease-in-out infinite;
+        }
+
+        @keyframes scan {
+            0% {
+                top: -18%;
+            }
+            55% {
+                top: 78%;
+            }
+            100% {
+                top: -18%;
+            }
+        }
+
+        /* 进度环 */
+        .ring {
+            position: absolute;
+            left: 50%;
+            top: 42%;
+            width: calc(var(--face) + 34px);
+            height: calc(var(--face) + 34px);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .ring circle {
+            fill: none;
+            stroke-width: 4;
+        }
+
+        .ring .bg {
+            stroke: rgba(255, 255, 255, .12);
+        }
+
+        .ring .fg {
+            stroke: var(--blue);
+            stroke-linecap: round;
+            transform: rotate(-90deg);
+            transform-origin: center;
+            transition: stroke-dashoffset .25s ease;
+        }
+
+        .camera-stage .hint {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(42% + var(--face) / 2 + 34px);
+            text-align: center;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            text-shadow: 0 1px 6px rgba(0, 0, 0, .6);
+            padding: 0 24px;
+        }
+
+        .camera-stage .subhint {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(42% + var(--face) / 2 + 64px);
+            text-align: center;
+            color: rgba(255, 255, 255, .66);
+            font-size: 12px;
+            padding: 0 24px;
+        }
+
+        .camera-stage .error-tip {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 16px;
+            max-width: 86%;
+            background: rgba(250, 81, 81, .92);
+            color: #fff;
+            font-size: 13px;
+            padding: 8px 14px;
+            border-radius: 18px;
+            display: none;
+        }
+
+        .camera-stage .foot {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: calc(18px + env(safe-area-inset-bottom));
+            padding: 0 28px;
+        }
+
+        .camera-stage .foot .btn {
+            background: rgba(255, 255, 255, .14);
+            border: 1px solid rgba(255, 255, 255, .4);
+            backdrop-filter: blur(6px);
+        }
+
+        .camera-stage .foot .btn.primary {
+            background: var(--blue);
+            border-color: var(--blue);
+        }
+
+        /* ---------- 处理中 ---------- */
+        .processing {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+        }
+
+        .spinner {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            border: 4px solid #e2e4e9;
+            border-top-color: var(--blue);
+            animation: spin .9s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .processing .t1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .processing .t2 {
+            font-size: 13px;
+            color: var(--ink-3);
+        }
+
+        /* ---------- 结果页 ---------- */
+        .result-hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 34px 0 8px;
+        }
+
+        .badge {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .badge.ok {
+            background: linear-gradient(160deg, #35d58a, #07c160);
+            box-shadow: 0 10px 28px rgba(7, 193, 96, .35);
+        }
+
+        .badge.bad {
+            background: linear-gradient(160deg, #ff8f76, #fa5151);
+            box-shadow: 0 10px 28px rgba(250, 81, 81, .35);
+        }
+
+        .badge svg {
+            width: 46px;
+            height: 46px;
+        }
+
+        .badge.ok path {
+            stroke: #fff;
+            stroke-width: 7;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 80;
+            stroke-dashoffset: 80;
+            animation: draw .5s .1s ease forwards;
+        }
+
+        @keyframes draw {
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        .result-hero .t1 {
+            margin-top: 16px;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .result-hero .t2 {
+            margin-top: 6px;
+            font-size: 13px;
+            color: var(--ink-3);
+            text-align: center;
+            padding: 0 24px;
+        }
+
+        .score-wrap {
+            margin: 16px 0 4px;
+            width: 100%;
+            padding: 0 4px;
+        }
+
+        .score-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: #e2e4e9;
+            overflow: hidden;
+        }
+
+        .score-bar i {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #69b1ff, var(--blue));
+            transition: width .8s ease;
+        }
+
+        .score-cap {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--ink-3);
+            margin-top: 6px;
+        }
+
+        /* ---------- 配置抽屉 ---------- */
+        .drawer-mask {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, .45);
+            z-index: 40;
+            display: none;
+        }
+
+        .drawer {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 41;
+            background: #fff;
+            border-radius: 20px 20px 0 0;
+            padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
+            transform: translateY(105%);
+            transition: transform .25s ease;
+        }
+
+        .drawer.open {
+            transform: translateY(0);
+        }
+
+        .drawer h3 {
+            font-size: 15px;
+            margin-bottom: 12px;
+        }
+
+        .drawer label {
+            display: block;
+            font-size: 12px;
+            color: var(--ink-3);
+            margin: 10px 0 6px;
+        }
+
+        .drawer input, .drawer textarea {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .drawer input:focus, .drawer textarea:focus {
+            border-color: var(--blue);
+        }
+
+        .drawer textarea {
+            height: 84px;
+            resize: none;
+            font-family: ui-monospace, Menlo, monospace;
+        }
+
+        .drawer .tip {
+            font-size: 11px;
+            color: var(--ink-3);
+            margin-top: 6px;
+            line-height: 1.6;
+        }
+
+        /* toast */
+        #toast {
+            position: absolute;
+            left: 50%;
+            bottom: 96px;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, .78);
+            color: #fff;
+            font-size: 13px;
+            padding: 9px 16px;
+            border-radius: 18px;
+            z-index: 60;
+            display: none;
+            max-width: 86%;
+            text-align: center;
+        }
+
+        .sec-title {
+            font-size: 13px;
+            color: var(--ink-3);
+            margin: 18px 4px 8px;
+        }
+    </style>
+</head>
+<body>
+<div class="phone" id="app">
+    <header class="navbar">
+        <span class="back" id="btnBack" style="visibility:hidden">‹</span>
+        <span class="title" id="navTitle">人脸核验</span>
+        <span class="spacer"></span>
+        <span class="gear" id="btnGear">⚙</span>
+    </header>
+
+    <div class="steps" id="steps">
+        <div class="step" id="step1"><span class="dot">1</span><span>人脸录入</span></div>
+        <div class="bar" id="stepBar"></div>
+        <div class="step" id="step2"><span class="dot">2</span><span>人脸认证</span></div>
+    </div>
+
+    <main>
+        <!-- ① 首页/同意 -->
+        <section class="view show" id="v-intro">
+            <div class="page">
+                <div class="card">
+                    <h3>人脸核验服务</h3>
+                    <p>本页面用于本地联调，完整演示平台两条链路：</p>
+                    <ul>
+                        <li><b>人脸录入</b>：申请挑战 → 摄像头采集 → 上传活体帧 → 建立加密人脸档案</li>
+                        <li><b>人脸认证</b>：重新申请挑战 → 采集活体帧 → 与已录入档案 1:1 比对 → 签发结果令牌</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>采集说明</h3>
+                    <ul>
+                        <li>请正面面对摄像头，保证光线充足、不逆光</li>
+                        <li>采集过程中请保持人脸完整位于取景框内，不要晃动</li>
+                        <li>请勿使用照片或屏幕翻拍代替真人</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <div class="kv"><span class="k">平台地址</span><span class="v mono" id="cfgBaseText">同源</span>
+                    </div>
+                    <div class="kv"><span class="k">鉴权状态</span><span class="v" id="tokenState">未获取</span></div>
+                </div>
+                <div class="agree">
+                    <input id="agreeChk" type="checkbox">
+                    <label for="agreeChk">我已阅读并同意<a href="#" onclick="return false">《人脸信息处理告知同意书》</a>，同意平台按租户留存策略采集与处理我的人脸信息，仅用于本次身份核验。</label>
+                </div>
+                <div class="btn-area">
+                    <button class="btn" disabled id="btnStart">人脸录入 + 人脸认证</button>
+                    <button class="btn ghost" disabled id="btnVerifyOnly">仅人脸认证（需已录入）</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ② 相机采集 -->
+        <section class="view" id="v-camera">
+            <div class="camera-stage">
+                <video autoplay id="cam" muted playsinline></video>
+                <div class="mask-ring"></div>
+                <svg class="ring" id="ringSvg" style="visibility:hidden" viewBox="0 0 264 264">
+                    <circle class="bg" cx="132" cy="132" r="124"></circle>
+                    <circle class="fg" cx="132" cy="132" id="ringFg" r="124" stroke-dasharray="779"
+                            stroke-dashoffset="779"></circle>
+                </svg>
+                <div class="scanline" id="scanline" style="display:none"></div>
+                <div class="error-tip" id="camError"></div>
+                <div class="hint" id="camHint">请将脸移入取景框</div>
+                <div class="subhint" id="camSub"></div>
+                <div class="foot">
+                    <button class="btn primary" id="btnCapture">开始采集</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ③ 处理中 -->
+        <section class="view" id="v-processing">
+            <div class="processing">
+                <div class="spinner"></div>
+                <div class="t1" id="procT1">正在处理</div>
+                <div class="t2" id="procT2">活体检测与比对中，请稍候</div>
+            </div>
+        </section>
+
+        <!-- ④ 单步结果 -->
+        <section class="view" id="v-result">
+            <div class="page">
+                <div class="result-hero">
+                    <div class="badge ok" id="resBadge">
+                        <svg viewBox="0 0 52 52">
+                            <path d="M14 27 L23 36 L39 17"/>
+                        </svg>
+                    </div>
+                    <div class="t1" id="resTitle">录入成功</div>
+                    <div class="t2" id="resDesc"></div>
+                </div>
+                <div class="score-wrap" id="scoreWrap" style="display:none">
+                    <div class="score-bar"><i id="scoreBar"></i></div>
+                    <div class="score-cap"><span>0</span><span id="scoreVal">--</span><span>1.0</span></div>
+                </div>
+                <div class="card" id="resDetailCard">
+                    <div class="kv"><span class="k">request_id</span><span class="v mono" id="resReqId">--</span></div>
+                    <div class="kv" id="resRowProfile" style="display:none"><span class="k">档案编号</span><span
+                            class="v mono">--</span></div>
+                    <div class="kv" id="resRowLiveness" style="display:none"><span class="k">活体判定</span><span
+                            class="v">--</span></div>
+                    <div class="kv" id="resRowToken" style="display:none"><span class="k">结果令牌</span><span
+                            class="v mono" onclick="copyToken()" style="cursor:pointer">点按复制</span></div>
+                </div>
+                <div class="btn-area">
+                    <button class="btn" id="btnNext">下一步</button>
+                    <button class="btn ghost" id="btnRetryStep">重试本步</button>
+                    <button class="btn red-ghost" id="btnAbort" style="display:none">终止流程</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑤ 全链路完成 -->
+        <section class="view" id="v-done">
+            <div class="page">
+                <div class="result-hero">
+                    <div class="badge ok">
+                        <svg viewBox="0 0 52 52">
+                            <path d="M14 27 L23 36 L39 17"/>
+                        </svg>
+                    </div>
+                    <div class="t1">全链路完成</div>
+                    <div class="t2">人脸录入与人脸认证均已通过，结果令牌已生成，可在业务后端验签消费</div>
+                </div>
+                <div class="card">
+                    <div class="sec-title" style="margin-top:0">链路摘要</div>
+                    <div class="kv"><span class="k">录入</span><span class="v" id="doneEnroll">--</span></div>
+                    <div class="kv"><span class="k">认证 1:1</span><span class="v" id="doneVerify">--</span></div>
+                    <div class="kv"><span class="k">结果令牌 jti</span><span class="v mono" id="doneJti">--</span></div>
+                    <div class="kv"><span class="k">令牌有效期</span><span class="v">5 分钟，一次性</span></div>
+                </div>
+                <div class="btn-area">
+                    <button class="btn" id="btnAgain">重新走一遍</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 配置抽屉 -->
+    <div class="drawer-mask" id="drawerMask"></div>
+    <div class="drawer" id="drawer">
+        <h3>联调配置</h3>
+        <label>平台 API 地址（留空 = 同源；后端未落地时填后端地址，需后端放开 CORS）</label>
+        <input id="cfgBase" placeholder="http://localhost:8080">
+        <label>JWT（留空则自动调用 POST /dev/token 获取；/dev/token 仅后端 dev profile 提供）</label>
+        <textarea id="cfgJwt" placeholder="eyJhbGciOi...（手动粘贴业务后端签发的短期 JWT）"></textarea>
+        <div class="tip">场景 scene 固定为 kyc；device_id
+            为本次会话随机生成，仅用于本地联调。帧与照片仅用于本次上传，不在本地留存。
+        </div>
+        <div class="btn-area" style="display:flex;gap:10px">
+            <button class="btn" id="btnSaveCfg" style="flex:1">保存</button>
+            <button class="btn ghost" id="btnCloseCfg" style="flex:1">关闭</button>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+</div>
+
+<script>
+    "use strict";
+    /* ================= 契约常量（与实施方案 §4 对齐） ================= */
+    const ERR_TEXT = {
+        AUTH_INVALID: "登录态无效或已过期，请重新获取令牌",
+        TENANT_DISABLED: "租户已停用，请联系管理员",
+        QUOTA_EXCEEDED: "核验次数已达上限，请稍后再试",
+        CHALLENGE_EXPIRED: "核验挑战已过期，请重新开始",
+        CHALLENGE_REPLAY: "核验挑战已被使用，请重新开始",
+        NO_FACE: "未检测到人脸，请正对取景框",
+        MULTI_FACE: "检测到多张人脸，请确保画面中只有您一人",
+        LOW_QUALITY: "画面清晰度不足，请补光后重试",
+        LIVENESS_FAILED: "活体检测未通过，请以真人状态重试",
+        ACTION_MISMATCH: "动作未完成，请按屏幕提示重试",
+        FACE_MISMATCH: "人脸比对不一致，认证未通过",
+        FACE_NOT_ENROLLED: "尚未录入人脸，请先完成人脸录入",
+        GALLERY_NOT_FOUND: "人脸库不存在或无权限",
+        DOCUMENT_UNSUPPORTED: "证件类型暂不支持",
+        DOCUMENT_LOW_CONFIDENCE: "证件识别置信度低，请重拍",
+        DOCUMENT_INVALID: "证件字段校验未通过",
+        SERVICE_UNAVAILABLE: "核验服务暂不可用，请稍后重试",
+        DEV_DISABLED: "开发端点未开放（后端未以 dev profile 启动）",
+        NETWORK: "无法连接平台服务，请检查地址或后端是否已启动"
+    };
+    const STEP = {INTRO: "intro", CAMERA: "camera", PROCESSING: "processing", RESULT: "result", DONE: "done"};
+    const ACTION_TEXT = {
+        straight: "请正视屏幕",
+        turn_left: "将头向左转",
+        turn_right: "将头向右转",
+        mouth_open: "请张一张嘴"
+    };
+
+    /* ================= 运行态 ================= */
+    const $ = (id) => document.getElementById(id);
+    const state = {
+        apiBase: localStorage.getItem("ft.apiBase") || "",
+        jwt: "",
+        deviceId: null,           // 会话级随机设备标识（联调占位，正式由 RN 端统一生成）
+        phase: "enroll",          // enroll | verify
+        challenge: null,
+        frames: [],
+        collected: 0,
+        capturing: false,
+        results: {enroll: null, verify: null},
+        mode: "full", // full=录入+认证 | solo=仅认证
+        lastRequestId: null, // 响应顶层 request_id（契约位置，成功/失败统一展示）
+        stream: null
+    };
+
+    /* ================= 基础工具 ================= */
+    function uuid() {
+        return (crypto.randomUUID && crypto.randomUUID()) || "id-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+    }
+
+    function toast(msg, ms) {
+        const t = $("toast");
+        t.textContent = msg;
+        t.style.display = "block";
+        clearTimeout(toast._h);
+        toast._h = setTimeout(() => (t.style.display = "none"), ms || 2400);
+    }
+
+    function deviceId() {
+        if (!state.deviceId) state.deviceId = sessionStorage.getItem("ft.deviceId") || uuid();
+        sessionStorage.setItem("ft.deviceId", state.deviceId);
+        return state.deviceId;
+    }
+
+    function base() {
+        return state.apiBase ? state.apiBase.replace(/\/+$/, "") : location.origin;
+    }
+
+    function showView(name) {
+        ["intro", "camera", "processing", "result", "done"].forEach((v) => $("v-" + v).classList.toggle("show", v === name));
+        $("btnBack").style.visibility = name === "intro" ? "hidden" : "visible";
+    }
+
+    function setStep(active) { // active: 1 | 2 | done
+        const s1 = $("step1"), s2 = $("step2"), bar = $("stepBar");
+        s1.className = "step" + (active === 1 ? " active" : active === "done" ? " done" : "");
+        s2.className = "step" + (active === 2 ? " active" : active === "done" ? " done" : "");
+        bar.className = "bar" + (active === "done" ? " done" : "");
+    }
+
+    function friendly(err) {
+        if (err && ERR_TEXT[err.code]) return ERR_TEXT[err.code] + "（" + err.code + "）";
+        return (err && err.message) || "操作失败，请重试";
+    }
+
+    /* ================= 平台 API（真实契约调用） ================= */
+    async function api(method, path, body, isForm, retried) {
+        const headers = {"X-Request-Id": uuid()};
+        if (state.jwt) headers["Authorization"] = "Bearer " + state.jwt;
+        if (!isForm) headers["Content-Type"] = "application/json";
+        if (method !== "GET") headers["Idempotency-Key"] = uuid();
+        let resp;
+        try {
+            resp = await fetch(base() + path, {
+                method, headers,
+                body: isForm ? body : body ? JSON.stringify(body) : undefined
+            });
+        } catch (e) {
+            throw {code: "NETWORK", message: e && e.message};
+        }
+        let json = null;
+        try {
+            json = await resp.json();
+        } catch (e) { /* 非 JSON 响应走 HTTP 状态分支 */
+        }
+        if (json && json.request_id) state.lastRequestId = json.request_id;
+        if (!resp.ok || (json && json.code !== 0 && json.code !== undefined && json.code !== "0")) {
+            const err = {
+                code: (json && (json.code === 0 ? null : json.code)) || "HTTP_" + resp.status,
+                message: (json && (json.message || json.msg)) || "HTTP " + resp.status,
+                requestId: json && json.request_id
+            };
+            // dev token 5 分钟过期：AUTH_INVALID 时清缓存自动重取一次（手动粘贴的 JWT 不自动重试）
+            if (err.code === "AUTH_INVALID" && !retried && !$("cfgJwt").value.trim()) {
+                state.jwt = "";
+                if (await ensureJwt()) return api(method, path, body, isForm, true);
+            }
+            throw err;
+        }
+        return (json && json.data !== undefined) ? json.data : json;
+    }
+
+    /* 端上令牌：优先 POST /dev/token（仅后端 dev profile），失败则要求手动粘贴 */
+    async function ensureJwt() {
+        if (state.jwt) return true;
+        if ($("cfgJwt").value.trim()) {
+            state.jwt = $("cfgJwt").value.trim();
+            return true;
+        }
+        try {
+            const data = await api("POST", "/dev/token", {});
+            const token = typeof data === "string" ? data : (data && (data.token || data.access_token || data.jwt));
+            if (!token) throw {code: "DEV_TOKEN_FORMAT", message: "/dev/token 响应中未找到令牌字段"};
+            state.jwt = token;
+            $("tokenState").textContent = "已获取（dev token）";
+            return true;
+        } catch (e) {
+            $("tokenState").textContent = "自动获取失败";
+            openDrawer();
+            toast("无法从 /dev/token 获取令牌，请在配置中手动粘贴 JWT");
+            return false;
+        }
+    }
+
+    /* ================= 相机与抓帧 ================= */
+    async function openCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+            throw {code: "CAMERA", message: "当前环境不支持摄像头（需 HTTPS 或 localhost）"};
+        state.stream = await navigator.mediaDevices.getUserMedia({
+            video: {facingMode: "user", width: {ideal: 1280}, height: {ideal: 960}}, audio: false
+        });
+        $("cam").srcObject = state.stream;
+    }
+
+    function closeCamera() {
+        if (state.stream) {
+            state.stream.getTracks().forEach((t) => t.stop());
+            state.stream = null;
+        }
+        $("cam").srcObject = null;
+    }
+
+    /* 抓一帧并压缩到限额内（契约：单帧 ≤2MB） */
+    function grabFrame() {
+        const video = $("cam");
+        const w = video.videoWidth, h = video.videoHeight;
+        if (!w || !h) return null;
+        const scale = Math.min(1, 720 / Math.max(w, h));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        const ctx = canvas.getContext("2d");
+        // 水平镜像（与预览一致）：注意 setTransform 会整体替换矩阵，
+        // 平移必须作为参数给出，否则画面被画到画布外 → 上传空白帧 → NO_FACE
+        ctx.setTransform(-1, 0, 0, 1, canvas.width, 0);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82));
+    }
+
+    /* ================= 流程编排 ================= */
+    async function startPhase(phase) {
+        state.phase = phase;
+        $("steps").style.display = state.mode === "solo" ? "none" : "flex";
+        if (!(await ensureJwt())) return;
+        showView(STEP.PROCESSING);
+        $("procT1").textContent = phase === "enroll" ? "正在申请录入挑战" : "正在申请认证挑战";
+        $("procT2").textContent = "POST /v1/challenges";
+        try {
+            const ch = await api("POST", "/v1/challenges", {
+                scene: "kyc", mode: phase, device_id: deviceId()
+            });
+            state.challenge = ch;
+            enterCamera(phase);
+        } catch (e) {
+            showFailure(phase, e);
+        }
+    }
+
+    function enterCamera(phase) {
+        showView(STEP.CAMERA);
+        setStep(phase === "enroll" ? 1 : 2);
+        state.frames = [];
+        state.collected = 0;
+        const need = (state.challenge && state.challenge.frame_count) || 8;
+        $("camHint").textContent = "请将脸移入取景框";
+        $("camSub").textContent = "本步需采集 " + need + " 帧";
+        $("btnCapture").textContent = "开始采集";
+        $("btnCapture").classList.add("primary");
+        $("btnCapture").disabled = false;
+        $("ringSvg").style.visibility = "hidden";
+        $("scanline").style.display = "none";
+        $("camError").style.display = "none";
+        openCamera().catch((e) => {
+            $("camError").textContent = e.message || "摄像头打开失败";
+            $("camError").style.display = "block";
+            $("btnCapture").disabled = true;
+        });
+    }
+
+    async function startCapture() {
+        if (state.capturing) return;
+        state.capturing = true;
+        $("btnCapture").disabled = true;
+        const need = (state.challenge && state.challenge.frame_count) || 15;
+        $("ringSvg").style.visibility = "visible";
+        $("scanline").style.display = "block";
+        $("camSub").textContent = "请按提示完成动作";
+        const actions = (state.challenge.actions && state.challenge.actions.length)
+            ? state.challenge.actions : ["straight"];
+        const per = Math.max(2, Math.round(need / actions.length));
+        const c = 2 * Math.PI * 124;
+        const ACTION_TIMEOUT = 15000;  // 单动作时限
+        let baselineFrames = [];       // straight 段帧：张嘴判定基线（每次预检都要携带）
+        try {
+            for (let a = 0; a < actions.length; a++) {
+                const act = actions[a];
+                if (a > 0) {
+                    $("camHint").textContent = "✓ 很好，下一个：";
+                    $("camHint").style.color = "#fff";
+                    $("camSub").textContent = ACTION_TEXT[act] || "请正视屏幕";
+                    await new Promise((r) => setTimeout(r, 900));
+                }
+                $("camHint").textContent = ACTION_TEXT[act] || "请正视屏幕";
+                $("camHint").style.color = act === "straight" ? "#fff" : "#69b1ff";
+                // 逐动作门控：持续采帧并周期性预检，服务端确认完成才进入下一个动作
+                const buffer = [];
+                const startedAt = Date.now();
+                let done = false;
+                while (!done) {
+                    const elapsed = Date.now() - startedAt;
+                    if (elapsed > ACTION_TIMEOUT) {
+                        throw {code: "ACTION_MISMATCH", message: "动作未完成：" + (ACTION_TEXT[act] || act) + "，超时"};
+                    }
+                    const blob = await grabFrame();
+                    if (blob) buffer.push(blob);
+                    const remain = Math.ceil((ACTION_TIMEOUT - elapsed) / 1000);
+                    $("camSub").textContent = "动作 " + (a + 1) + "/" + actions.length + " · 剩余 " + remain + " 秒";
+                    // 每 3 帧预检一次（不消费挑战，仅引导反馈）；张嘴每次都要带基线帧
+                    if (buffer.length >= 3 && buffer.length % 3 === 0) {
+                        const fd = new FormData();
+                        fd.append("action", act);
+                        buffer.slice(-6).forEach((b) => fd.append("frames", b, "f.jpg"));
+                        if (act === "mouth_open" && baselineFrames.length) {
+                            baselineFrames.forEach((b) => fd.append("baseline_frames", b, "b.jpg"));
+                        }
+                        try {
+                            const r = await api("POST", "/v1/action-check", fd, true);
+                            if (r.satisfied) {
+                                $("camHint").textContent = "✓ 很好";
+                                for (let k = 0; k < 2; k++) {
+                                    const hb = await grabFrame();
+                                    if (hb) buffer.push(hb);
+                                    await new Promise((r2) => setTimeout(r2, 320));
+                                }
+                                done = true;
+                            } else {
+                                $("camSub").textContent = "继续动作，夸张一点 · 剩余 " + remain + " 秒";
+                            }
+                        } catch (e) { /* 预检网络抖动忽略，继续采集 */
+                        }
+                    }
+                    await new Promise((r) => setTimeout(r, 400));
+                }
+                // 保留本动作最后 per 帧（含确认后的保持帧）用于最终整单校验
+                state.frames.push(...buffer.slice(-per));
+                if (act === "straight" && !baselineFrames.length) baselineFrames = buffer.slice(0, 2);
+                state.collected = state.frames.length;
+                $("ringFg").style.strokeDashoffset = String(c * (1 - Math.min(1, state.collected / need)));
+            }
+        } catch (e) {
+            state.capturing = false;
+            closeCamera();
+            showFailure(state.phase, e);
+            return;
+        }
+        state.capturing = false;
+        $("camHint").textContent = "采集完成";
+        $("camSub").textContent = "正在上传…";
+        $("scanline").style.display = "none";
+        setTimeout(() => uploadPhase(state.phase), 350);
+    }
+
+    async function uploadPhase(phase) {
+        closeCamera();
+        showView(STEP.PROCESSING);
+        const isEnroll = phase === "enroll";
+        $("procT1").textContent = isEnroll ? "正在建立人脸档案" : "正在进行 1:1 比对";
+        $("procT2").textContent = isEnroll ? "POST /v1/enrollments" : "POST /v1/verifications";
+        const form = new FormData();
+        form.append("challenge_id", state.challenge.challenge_id);
+        form.append("device_id", deviceId());
+        if (state.challenge.nonce) form.append("nonce", state.challenge.nonce);
+        state.frames.forEach((f) => form.append("frames", f, "frame.jpg"));
+        try {
+            const data = isEnroll
+                ? await api("POST", "/v1/enrollments", form, true)
+                : await api("POST", "/v1/verifications", form, true);
+            state.results[phase] = data;
+            state.frames.forEach((f) => URL.revokeObjectURL(f && f.__url)); // 释放本地引用
+            state.frames = [];
+            showSuccess(phase, data);
+        } catch (e) {
+            showFailure(phase, e);
+        }
+    }
+
+    function showSuccess(phase, data) {
+        const isEnroll = phase === "enroll";
+        setStep(isEnroll ? 2 : "done");
+        showView(STEP.RESULT);
+        $("resBadge").className = "badge ok";
+        $("resTitle").textContent = isEnroll ? "人脸录入成功" : "人脸认证通过";
+        $("resDesc").textContent = isEnroll
+            ? "已建立加密人脸档案，可进行 1:1 认证"
+            : "已与录入档案比对通过，结果令牌已签发";
+        const score = data && (data.score !== undefined ? data.score : data.top1_score);
+        if (score !== undefined && score !== null && !isEnroll) {
+            $("scoreWrap").style.display = "block";
+            const pct = Math.max(0, Math.min(100, Number(score) * 100));
+            setTimeout(() => {
+                $("scoreBar").style.width = pct + "%";
+            }, 60);
+            $("scoreVal").textContent = Number(score).toFixed(4);
+        } else {
+            $("scoreWrap").style.display = "none";
+        }
+        $("resReqId").textContent = state.lastRequestId || "--";
+        $("resRowProfile").style.display = isEnroll && data && data.profile_id ? "flex" : "none";
+        if (isEnroll) $("resRowProfile").querySelector(".v").textContent = data.profile_id + "（" + (data.status || "active") + "）";
+        $("resRowLiveness").style.display = !isEnroll && data && data.liveness ? "flex" : "none";
+        if (!isEnroll && data.liveness) $("resRowLiveness").querySelector(".v").textContent = data.liveness;
+        $("resRowToken").style.display = !isEnroll && data && data.verification_token ? "flex" : "none";
+        $("btnNext").textContent = isEnroll ? "进入人脸认证 →" : (state.mode === "solo" ? "查看认证结果" : "查看全链路摘要");
+        $("btnAbort").style.display = isEnroll ? "none" : "none";
+        $("btnRetryStep").textContent = "重试本步";
+        $("btnNext").dataset.phase = phase;
+    }
+
+    function showFailure(phase, err) {
+        closeCamera();
+        showView(STEP.RESULT);
+        $("resBadge").className = "badge bad";
+        $("resTitle").textContent = phase === "enroll" ? "人脸录入失败" : "人脸认证失败";
+        $("resDesc").textContent = friendly(err);
+        $("scoreWrap").style.display = "none";
+        $("resReqId").textContent = (err && err.requestId) || state.lastRequestId || "--";
+        $("resRowProfile").style.display = "none";
+        $("resRowLiveness").style.display = "none";
+        $("resRowToken").style.display = "none";
+        $("btnNext").textContent = "返回首页";
+        $("btnNext").dataset.phase = "fail";
+        $("btnRetryStep").textContent = "重试本步";
+        toast(friendly(err));
+    }
+
+    function copyToken() {
+        const t = state.results.verify && state.results.verify.verification_token;
+        if (t && navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast("已复制结果令牌"));
+    }
+
+    /* ================= 事件绑定 ================= */
+    $("agreeChk").addEventListener("change", (e) => {
+        $("btnStart").disabled = !e.target.checked;
+        $("btnVerifyOnly").disabled = !e.target.checked;
+    });
+    $("btnStart").addEventListener("click", () => {
+        state.mode = "full";
+        startPhase("enroll");
+    });
+    $("btnVerifyOnly").addEventListener("click", () => {
+        state.mode = "solo";
+        startPhase("verify");
+    });
+    $("btnCapture").addEventListener("click", startCapture);
+    $("btnGear").addEventListener("click", openDrawer);
+    $("drawerMask").addEventListener("click", closeDrawer);
+    $("btnCloseCfg").addEventListener("click", closeDrawer);
+    $("btnSaveCfg").addEventListener("click", () => {
+        state.apiBase = $("cfgBase").value.trim();
+        localStorage.setItem("ft.apiBase", state.apiBase);
+        const manual = $("cfgJwt").value.trim();
+        state.jwt = manual;
+        $("cfgBaseText").textContent = state.apiBase || "同源";
+        $("tokenState").textContent = manual ? "已配置手动 JWT" : "未获取";
+        closeDrawer();
+        toast("配置已保存");
+    });
+
+    function openDrawer() {
+        $("cfgBase").value = state.apiBase;
+        $("drawer").classList.add("open");
+        $("drawerMask").style.display = "block";
+    }
+
+    function closeDrawer() {
+        $("drawer").classList.remove("open");
+        $("drawerMask").style.display = "none";
+    }
+
+    $("btnNext").addEventListener("click", (e) => {
+        const phase = e.target.dataset.phase;
+        if (phase === "enroll") startPhase("verify");
+        else if (phase === "verify") {
+            const v = state.results.verify || {};
+            $("doneEnroll").textContent = state.results.enroll
+                ? "成功（" + (state.results.enroll.profile_id || "").slice(0, 8) + "…）"
+                : "未执行（本次仅认证，使用已录入档案）";
+            $("doneVerify").textContent = "通过，score=" + (v.score !== undefined ? Number(v.score).toFixed(4) : "--");
+            $("doneJti").textContent = (v.verification_token || "").slice(0, 24) + "…";
+            showView(STEP.DONE);
+        } else {
+            backToIntro();
+        }
+    });
+    $("btnRetryStep").addEventListener("click", () => startPhase(state.phase));
+
+    function backToIntro() {
+        state.results = {enroll: null, verify: null};
+        $("steps").style.display = "flex";
+        setStep(1);
+        showView(STEP.INTRO);
+    }
+
+    $("btnAgain").addEventListener("click", backToIntro);
+    $("btnBack").addEventListener("click", () => {
+        if (!state.capturing) {
+            closeCamera();
+            backToIntro();
+        }
+    });
+
+    /* 初始化 */
+    $("cfgBaseText").textContent = state.apiBase || "同源";
+</script>
+</body>
+</html>

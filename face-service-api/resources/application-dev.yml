@@ -1,0 +1,14 @@
+# 仅 dev profile：dev token 双条件之一（另一个是 enable-dev-token=true）
+faceservice:
+  auth:
+    enable-dev-token: true
+    # 本地默认密钥仅用于联调；生产必须从环境变量注入强密钥
+    dev-signing-key: ${AUTH_DEV_SIGNING_KEY:ZGV2LXNpZ25pbmcta2V5LTMyLWJ5dGVzLWZvci1ob25seQ==}
+    result-token-signing-key: ${AUTH_RESULT_TOKEN_KEY:cmVzdWx0LXRva2VuLXNpZ25pbmcta2V5LTMyLWJ5dGVz}
+
+security:
+  master-key: ${SECURITY_MASTER_KEY:ZmFjZXNlcnZpY2UtZGV2LW1hc3Rlci1rZXktMzItYnl0ZXMh}
+
+logging:
+  level:
+    faceservice: DEBUG
