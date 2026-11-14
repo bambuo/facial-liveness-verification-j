@@ -1,8 +1,10 @@
 package faceservice.api.security;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import faceservice.contracts.ErrorCode;
 import faceservice.contracts.FaceServiceException;
-import org.springframework.jdbc.core.JdbcTemplate;
+import faceservice.infrastructure.persistence.TenantEntity;
+import faceservice.infrastructure.persistence.mapper.TenantMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -14,21 +16,23 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class TenantLookup {
 
-    private final JdbcTemplate jdbc;
+    private final TenantMapper tenants;
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
-    public TenantLookup(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public TenantLookup(TenantMapper tenants) {
+        this.tenants = tenants;
     }
 
     public String idOf(String tenantCode) {
         return cache.computeIfAbsent(tenantCode, code -> {
-            var ids = jdbc.queryForList("SELECT id FROM face_tenants WHERE code = ? AND status = 'active'",
-                    String.class, code);
-            if (ids.isEmpty()) {
+            TenantEntity tenant = tenants.selectOne(Wrappers.<TenantEntity>lambdaQuery()
+                    .select(TenantEntity::getId)
+                    .eq(TenantEntity::getCode, code)
+                    .eq(TenantEntity::getStatus, "active"));
+            if (tenant == null) {
                 throw new FaceServiceException(ErrorCode.TENANT_DISABLED);
             }
-            return ids.getFirst();
+            return tenant.getId();
         });
     }
 }

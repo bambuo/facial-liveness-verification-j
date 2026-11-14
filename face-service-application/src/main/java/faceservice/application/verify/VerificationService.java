@@ -1,5 +1,6 @@
 package faceservice.application.verify;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import faceservice.application.challenge.ActionVerifier;
 import faceservice.application.challenge.ChallengeService;
 import faceservice.application.challenge.ChallengeService.Challenge;
@@ -91,22 +92,19 @@ public class VerificationService {
             throw new FaceServiceException(ErrorCode.LOW_QUALITY);
         }
 
-        var subject = subjectMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SubjectEntity>()
-                        .eq(SubjectEntity::getExternalSubjectId, principal.sub())
-                        .eq(SubjectEntity::getStatus, "active")
-                        .last("LIMIT 1"));
-        String subjectId = subject.isEmpty() ? null : subject.getFirst().getId();
+        SubjectEntity subject = subjectMapper.selectOne(Wrappers.<SubjectEntity>lambdaQuery()
+                .select(SubjectEntity::getId)
+                .eq(SubjectEntity::getExternalSubjectId, principal.sub())
+                .eq(SubjectEntity::getStatus, "active"));
+        String subjectId = subject == null ? null : subject.getId();
         if (subjectId == null) {
             throw new FaceServiceException(ErrorCode.FACE_NOT_ENROLLED);
         }
         actionVerifier.verify(challenge.actions(), challenge.framesPerAction(), frames);
 
-        FaceProfileEntity profile = profiles.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FaceProfileEntity>()
-                        .eq(FaceProfileEntity::getSubjectId, subjectId)
-                        .eq(FaceProfileEntity::getStatus, "active")
-                        .last("LIMIT 1"));
+        FaceProfileEntity profile = profiles.selectOne(Wrappers.<FaceProfileEntity>lambdaQuery()
+                .eq(FaceProfileEntity::getSubjectId, subjectId)
+                .eq(FaceProfileEntity::getStatus, "active"));
         if (profile == null) {
             throw new FaceServiceException(ErrorCode.FACE_NOT_ENROLLED);
         }

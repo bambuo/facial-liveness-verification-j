@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="faceservice.infrastructure.persistence.mapper.TenantKeyMapper">
+
+    <select id="selectActive" resultType="faceservice.infrastructure.persistence.TenantKeyEntity">
+        SELECT id, tenant_id, key_version, key_cipher, status, created_at
+        FROM face_tenant_keys
+        WHERE tenant_id = #{tenantId}
+          AND status = 'active'
+        ORDER BY key_version DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMaxVersion" resultType="java.lang.Integer">
+        SELECT COALESCE(MAX(key_version), 0)
+        FROM face_tenant_keys
+        WHERE tenant_id = #{tenantId}
+    </select>
+</mapper>
