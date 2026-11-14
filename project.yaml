@@ -1,7 +1,0 @@
-# Kotlin Toolchain 项目配置：模块列表（含 module.yaml 的目录）
-modules:
-  - face-service-api
-  - face-service-application
-  - face-service-contracts
-  - face-service-domain
-  - face-service-infrastructure

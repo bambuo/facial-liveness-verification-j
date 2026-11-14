@@ -3,9 +3,11 @@
 build/
 out/
 # 模型文件不入库（见 docs/功能/04）
-models/
+face-service-api/src/main/resources/models/
 # 本地凭据
 deploy/.env
 *.log
 .DS_Store
 .idea/
+*.iml
+target/

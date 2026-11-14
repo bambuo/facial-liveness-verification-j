@@ -67,11 +67,11 @@ mica:
     face:
       model:
         detection:
-          path: ${FACE_MODEL_DIR:models}/face_detection_yunet_2023mar.onnx
+          path: classpath:models/face_detection_yunet_2023mar.onnx
         recognition:
-          path: ${FACE_MODEL_DIR:models}/face_recognition_sface_2021dec.onnx
+          path: classpath:models/face_recognition_sface_2021dec.onnx
         liveness:
-          path: ${FACE_MODEL_DIR:models}/2.7_80x80_MiniFASNetV2.onnx
+          path: classpath:models/2.7_80x80_MiniFASNetV2.onnx
       detection:
         threshold: 0.9
         nms-threshold: 0.3
